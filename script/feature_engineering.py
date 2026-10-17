@@ -139,6 +139,81 @@ def make_origin_demand_features(history: pd.DataFrame) -> pd.DataFrame:
     return features
 
 
+def make_prior_closure_features(
+    history: pd.DataFrame,
+    future_rows: pd.DataFrame,
+) -> pd.DataFrame:
+    schedule = pd.concat(
+        [
+            history[["HubID", "Date", "IsOpen"]],
+            future_rows[["HubID", "Date", "IsOpen"]],
+        ],
+        ignore_index=True,
+    ).sort_values(["HubID", "Date"]).reset_index(drop=True)
+    if not schedule["IsOpen"].isin([0, 1]).all():
+        raise ValueError("IsOpen must contain only 0 (closed) or 1 (open).")
+    if schedule.duplicated(["HubID", "Date"]).any():
+        raise ValueError(
+            "Combined history and forecast rows contain duplicate HubID/Date "
+            "records while creating closure features."
+        )
+
+    schedule_by_hub = schedule.groupby("HubID", sort=False)
+    previous_date = schedule_by_hub["Date"].shift(1)
+    consecutive_day = schedule["Date"].sub(previous_date).eq(
+        pd.Timedelta(days=1)
+    )
+    segment_break = schedule["IsOpen"].eq(1) | ~consecutive_day
+    segment_ids = segment_break.groupby(schedule["HubID"], sort=False).cumsum()
+    closed_streak = schedule["IsOpen"].eq(0).astype("int16").groupby(
+        [schedule["HubID"], segment_ids],
+        sort=False,
+    ).cumsum()
+    previous_streak = closed_streak.groupby(
+        schedule["HubID"],
+        sort=False,
+    ).shift(1).fillna(0)
+    schedule["ClosedStreakBeforeDate"] = previous_streak.where(
+        consecutive_day,
+        0,
+    ).astype("int16")
+
+    for window, feature_name in (
+        (7, "ClosedDaysPrevious7Days"),
+        (30, "ClosedDaysPrevious30Days"),
+    ):
+        closed = schedule.assign(
+            _IsClosed=schedule["IsOpen"].eq(0).astype("int8")
+        )
+        rolling = (
+            closed.groupby("HubID", sort=False)
+            .rolling(
+                f"{window}D",
+                on="Date",
+                closed="left",
+                min_periods=1,
+            )["_IsClosed"]
+            .sum()
+        )
+        schedule[feature_name] = rolling.reset_index(drop=True).fillna(0).astype(
+            "int8"
+        )
+
+    feature_columns = [
+        "HubID",
+        "Date",
+        "ClosedStreakBeforeDate",
+        "ClosedDaysPrevious7Days",
+        "ClosedDaysPrevious30Days",
+    ]
+    return future_rows[["HubID", "Date"]].merge(
+        schedule[feature_columns],
+        on=["HubID", "Date"],
+        how="left",
+        validate="one_to_one",
+    )
+
+
 def build_forecast_features(
     history: pd.DataFrame,
     future_rows: pd.DataFrame,
@@ -147,6 +222,13 @@ def build_forecast_features(
     forecast_origin: pd.Timestamp,
 ) -> pd.DataFrame:
     result = add_calendar_features(future_rows, first_date)
+    closure_features = make_prior_closure_features(history, future_rows)
+    result = result.merge(
+        closure_features,
+        on=["HubID", "Date"],
+        how="left",
+        validate="one_to_one",
+    )
     result = result.merge(
         metadata,
         on="HubID",

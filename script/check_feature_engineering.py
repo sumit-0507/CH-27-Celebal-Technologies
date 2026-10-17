@@ -1,6 +1,7 @@
 """Report whether a tracked project job is currently running."""
 
 import argparse
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,39 @@ TERMINAL_STATES = {"completed", "failed"}
 
 
 def process_is_running(process_id: int) -> bool:
+    if os.name == "nt":
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = (ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32)
+        open_process.restype = ctypes.c_void_p
+        get_exit_code = kernel32.GetExitCodeProcess
+        get_exit_code.argtypes = (
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_uint32),
+        )
+        get_exit_code.restype = ctypes.c_int
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = (ctypes.c_void_p,)
+        close_handle.restype = ctypes.c_int
+
+        handle = open_process(0x1000, False, process_id)
+        if not handle:
+            error_code = ctypes.get_last_error()
+            if error_code == 5:
+                return True
+            if error_code == 87:
+                return False
+            raise OSError(error_code, "Unable to inspect process status.")
+
+        try:
+            exit_code = ctypes.c_uint32()
+            if not get_exit_code(handle, ctypes.byref(exit_code)):
+                error_code = ctypes.get_last_error()
+                raise OSError(error_code, "Unable to read process exit code.")
+            return exit_code.value == 259
+        finally:
+            close_handle(handle)
+
     try:
         os.kill(process_id, 0)
     except ProcessLookupError:
