@@ -1,0 +1,153 @@
+# CH'27 Celebal Technologies × IIT Guwahati
+## Building a Forecasting Engine for a Rapidly Growing Dark-Store Delivery Business
+
+**Competition:** [Kaggle Competition](https://www.kaggle.com/competitions/173291)  
+**Problem Type:** Time-Series Regression / Demand Forecasting  
+**Evaluation Metric:** Root Mean Squared Logarithmic Error (RMSLE)
+
+## Overview
+
+Company_X operates a network of over 800 micro-fulfillment hubs that deliver groceries and household essentials within 15–30 minutes of order placement.
+
+With limited storage capacity and tight delivery windows, accurate demand forecasting is essential. Overstocking increases storage costs and the risk of perishable goods going to waste, while understocking leads to cancelled orders and reduced customer trust.
+
+This competition challenges participants to build a forecasting engine that predicts **daily order volume for each fulfillment hub over a future time window** using historical order data, hub attributes, promotional activity, calendar information, and operational context.
+
+The resulting forecasts will support inventory replenishment, picker and packer staffing, and delivery fleet allocation.
+
+## Problem Statement
+
+Develop a robust forecasting model that predicts future daily order volumes across a large network of fulfillment hubs.
+
+The task is a regression problem evaluated on a held-out future time period. Models must generalize to unseen future dates rather than relying on random train-test splits.
+
+Key challenges include:
+
+- Capturing hub-specific demand patterns and temporal trends.
+- Accounting for weekday, holiday, and promotional effects.
+- Incorporating hub characteristics and operational context.
+- Handling differences in demand across small, large, mature, and newly launched hubs.
+- Predicting zero-order days accurately, including periods when hubs are closed or undergoing renovation.
+- Avoiding data leakage from information unavailable at prediction time.
+
+## Dataset Description
+
+The competition provides three CSV files.
+
+| File | Description |
+|---|---|
+| `orders_train.csv` | Historical daily order volumes per hub, together with operational, promotional, and calendar features. |
+| `orders_test.csv` | Future-period records with the same general structure as the training data, but with `OrderVolume` omitted for prediction. |
+| `hub_metadata.csv` | Static and semi-static hub attributes, including format, assortment tier, competitor distance, tenure, loyalty program status, and launch date. |
+
+### Key Features
+
+The provided data includes information such as:
+
+- **Hub identifier:** `Store`
+- **Target variable:** `OrderVolume`
+- **Operational context:** Rider availability and operational status
+- **Promotional context:** Promotion activity
+- **Calendar features:** Day of week and holiday indicators
+- **Hub attributes:** Store format, assortment tier, competitor distance, hub tenure, loyalty program status, and launch date
+
+The three files share the `Store` identifier, which can be used to join hub metadata with order records.
+
+**Data constraint:** No external data may be used to supplement the provided files.
+
+Note that `orders_test.csv` contains planned or scheduled values for certain same-day operational variables, such as rider headcount, rather than actual values that would not be available in advance. These fields should be interpreted according to their availability at forecast time.
+
+## Evaluation Metric
+
+Submissions are evaluated using **Root Mean Squared Logarithmic Error (RMSLE)** between predicted and actual order volumes.
+
+\[
+\operatorname{RMSLE}
+=
+\sqrt{
+\frac{1}{n}
+\sum_{i=1}^{n}
+\left[
+\ln(1+p_i)-\ln(1+a_i)
+\right]^2
+}
+\]
+
+Where:
+
+- \(n\) is the number of test observations.
+- \(p_i\) is the predicted order volume for observation \(i\).
+- \(a_i\) is the actual order volume for observation \(i\).
+- \(\ln\) denotes the natural logarithm.
+
+### Why RMSLE?
+
+Hub sizes can vary substantially across the network. RMSLE evaluates errors on a logarithmic scale, making proportional differences more important than absolute differences.
+
+This helps prevent a small number of high-volume hubs from dominating the evaluation and gives greater importance to forecasting performance across hubs of different sizes.
+
+The metric also accommodates zero actual order volumes, unlike percentage-based metrics such as MAPE, which are undefined when actual values are zero.
+
+**Modeling implication:** Predictions must be non-negative. A common approach is to clip negative predictions to zero before generating the submission file.
+
+## Recommended Modeling Approach
+
+A strong solution should prioritize temporal validation, hub-level patterns, and features that are genuinely available when forecasts are made.
+
+1. **Exploratory Data Analysis (EDA)**
+   - Inspect missing values, duplicate records, and target distributions.
+   - Analyze daily, weekly, and hub-specific demand patterns.
+   - Investigate zero-order days and hub operating status.
+
+2. **Feature Engineering**
+   - Extract date-based features where dates are available.
+   - Encode categorical hub and operational attributes.
+   - Incorporate historical lag features and rolling statistics, ensuring that only information available at prediction time is used.
+   - Join hub metadata using `Store`.
+
+3. **Time-Based Validation**
+   - Use chronological holdout periods or rolling-origin validation.
+   - Avoid random splitting because the test set represents a future time window.
+   - Match the validation strategy to the competition's forecast horizon and available history.
+
+4. **Model Development**
+   - Establish simple seasonal-naive and hub-level baselines.
+   - Evaluate gradient-boosted tree models such as LightGBM, XGBoost, or CatBoost.
+   - Compare against appropriate time-series methods, including ETS, ARIMA/SARIMA, or Prophet, where suitable.
+   - Consider global models trained across hubs, with hub identifiers and metadata as features.
+
+5. **Optimization and Ensembling**
+   - Tune models against RMSLE on chronological validation data.
+   - Analyze performance across different hub sizes and operating conditions.
+   - Test complementary models and ensembles without using future information.
+
+6. **Submission Validation**
+   - Generate predictions for every row in `orders_test.csv`.
+   - Ensure predictions are non-negative.
+   - Verify the required submission columns, row count, and row ordering against the competition's sample submission, if provided.
+
+## Submission
+
+The final submission should contain predicted `OrderVolume` values for the observations in `orders_test.csv`, following the exact format required by the Kaggle competition.
+
+Before submission, verify that:
+
+- All test observations have predictions.
+- Predictions are finite and non-negative.
+- The column names and ordering match the required submission format.
+- The model uses no prohibited external data or future information.
+
+## Competition Information
+
+- **Organizers:** Celebal Technologies and IIT Guwahati
+- **Business domain:** Quick commerce and dark-store operations
+- **Forecasting objective:** Daily order-volume prediction by hub
+- **Primary evaluation metric:** RMSLE
+- **Data source:** Competition-provided CSV files
+- **External data:** Not permitted
+
+For the official rules, dataset downloads, and submission instructions, visit the [Kaggle competition page](https://www.kaggle.com/competitions/173291).
+
+---
+
+*This README describes the competition problem and a recommended modeling workflow. It does not claim any specific model performance or leaderboard result.*
